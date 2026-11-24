@@ -162,5 +162,44 @@ async function renderLB() {
   }
 }
 </script>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+#global-game-account-bridge{margin:14px auto;max-width:1100px;padding:13px 16px;border:1px solid #c7d5e8;border-radius:12px;background:#edf4fb;color:#17324f;font:13px/1.5 system-ui,sans-serif}
+#global-game-account-bridge input{padding:9px;border:1px solid #b8c8d9;border-radius:8px;max-width:100%}
+#global-game-account-bridge button{padding:9px 13px;border:0;border-radius:8px;background:#174d79;color:white;font-weight:700}
+#global-game-account-bridge .g-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+#global-game-account-bridge .g-row input{flex:1 1 180px}
+</style>
+<section id="global-game-account-bridge" aria-live="polite">
+ <b>🌐 Akun Global / Global Account</b>
+ <div id="ggb-status">Memeriksa sesi akun… / Checking account session…</div>
+ <form id="ggb-login" hidden>
+  <div class="g-row"><input id="ggb-email" type="email" autocomplete="username" placeholder="Email" required><input id="ggb-password" type="password" autocomplete="current-password" placeholder="Password" required></div>
+  <div class="g-row"><button type="submit">Masuk / Sign in</button><span style="align-self:center">Gunakan akun global yang sama seperti portal Davy Analytics.</span></div>
+ </form>
+</section>
+<script id="global-game-account-bridge">
+(function(){
+ const URL='https://rurfluvlcnexxuwfngaj.supabase.co',KEY='sb_publishable_7sAD1TO-uxvyTRprr1nvaw_06pyi737',GAME='battle_of_choices';
+ const $=id=>document.getElementById(id),status=$('ggb-status'),form=$('ggb-login');
+ if(!window.supabase){status.textContent='Layanan akun tidak dapat dimuat.';return;}
+ const db=window.supabase.createClient(URL,KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+ let user=null,sessionId=null,rounds=[],started=false,saving=false;
+ async function init(){const {data,error}=await db.auth.getSession();if(error){status.textContent='Gagal memeriksa akun: '+error.message;form.hidden=false;return;}if(data.session){user=data.session.user;status.textContent='Login: '+user.email+' · Hasil latihan akan disimpan ke akun global.';}else{status.textContent='Masuk dengan akun global untuk merekam sesi dan hasil permainan. / Sign in to save your game.';form.hidden=false;}}
+ form.addEventListener('submit',async e=>{e.preventDefault();const b=form.querySelector('button');b.disabled=true;const {data,error}=await db.auth.signInWithPassword({email:$('ggb-email').value.trim(),password:$('ggb-password').value});b.disabled=false;if(error){status.textContent='Login gagal: '+error.message;return;}user=data.user;form.hidden=true;status.textContent='Login: '+user.email+' · Akun global aktif.';});
+ async function begin(){if(!user||started)return;const {data,error}=await db.from('global_game_sessions').insert({user_id:user.id,game_code:GAME,session_mode:'practice',language:'id',status:'started',metadata:{source:'battle-of-choices',mode:'practice'}}).select('id').single();if(error){status.textContent='Sesi gagal disimpan: '+error.message;return;}sessionId=data.id;rounds=[];started=true;status.textContent='Sesi tersimpan · '+sessionId.slice(0,8);}
+ async function saveRound(data){if(!sessionId)return;const row={session_id:sessionId,round_number:rounds.length+1,round_type:'choice_reflection',response_data:data,score:Number(data.score)||0};const {error}=await db.from('global_game_rounds').insert(row);if(error)status.textContent='Ronde tidak tersimpan: '+error.message;}
+ async function finish(){if(!sessionId||saving)return;saving=true;const {error:se}=await db.from('global_game_sessions').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',sessionId).eq('user_id',user.id);if(se){status.textContent='Sesi selesai tetapi gagal ditutup: '+se.message;saving=false;return;}const total=rounds.reduce((a,r)=>a+(Number(r.score)||0),0);const {error:re}=await db.from('global_game_results').insert({session_id:sessionId,user_id:user.id,game_code:GAME,total_score:total,rounds_completed:rounds.length,is_verified:false});if(re){status.textContent='Sesi tersimpan, hasil akhir gagal: '+re.message;saving=false;return;}status.textContent='✓ Hasil latihan tersimpan di akun global ('+rounds.length+' ronde). Skor belum diverifikasi dan tidak masuk leaderboard resmi.';sessionId=null;started=false;saving=false;}
+ const originalStart=window.startPractice;
+ window.startPractice=function(){if(!user){status.textContent='Silakan login terlebih dahulu sebelum memulai latihan.';form.hidden=false;return;}originalStart();setTimeout(begin,0);};
+ const originalNext=window.next;
+ window.next=function(){const before={stage,idx,choice,strategy,checkCount,name:cases[idx]?.name,actual:cases[idx]?.actualName,prediction:cases[idx]?.choices?.[choice]};originalNext();if(before.stage===4&&sessionId){const item={round:before.idx+1,respondent:before.name,actual_choice:before.actual,predicted_choice:before.prediction,strategy:before.strategy,score:before.checkCount};rounds.push(item);saveRound(item).then(()=>{if(stage===5)finish();});}};
+ window.addEventListener('beforeunload',()=>{if(sessionId)status.textContent='Sesi belum selesai.';});
+ db.auth.onAuthStateChange((event,s)=>{if(event==='SIGNED_OUT'){user=null;status.textContent='Anda keluar dari akun global.';form.hidden=false;}});
+ init();
+})();
+</script>
+
 </body>
 </html>
